@@ -1,0 +1,22 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url "https://devserver3.ustadmobile.com/maven2/" }
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://devserver3.ustadmobile.com/maven2/" }
+    }
+}
+
+rootProject.name = "EmergencyMesh"
+include ':app'
+
+// Meshrabiya is pulled from Maven repository, not local module

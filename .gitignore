@@ -1,0 +1,44 @@
+# Build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+build/
+app/build/
+gradle-build/
+
+# Keystore files
+*.keystore
+*.jks
+
+# Local configuration
+local.properties
+gradle.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+
+# Android Studio
+captures/
+.externalNativeBuild
+.cxx
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

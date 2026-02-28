@@ -1,0 +1,15 @@
+# Emergency Mesh - Production Release Signing
+# Copy this to gradle.properties and fill in your values
+# NEVER commit gradle.properties with passwords to version control
+
+# Keystore file location (relative to android/ directory)
+RELEASE_STORE_FILE=../emergency-mesh-release.keystore
+
+# Keystore password (CHANGE THIS!)
+RELEASE_STORE_PASSWORD=
+
+# Key password (usually same as keystore password)
+RELEASE_KEY_PASSWORD=
+
+# Key alias
+RELEASE_KEY_ALIAS=emergency-mesh

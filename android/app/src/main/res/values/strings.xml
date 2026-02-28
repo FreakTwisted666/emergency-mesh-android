@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Emergency Mesh</string>
+    <string name="sos_button">SOS</string>
+    <string name="sos_active">SOS ACTIVE</string>
+    <string name="sending_sos">Sending SOS signal…</string>
+    <string name="sos_broadcasting">Broadcasting distress signal</string>
+    <string name="nearby_devices">Nearby Devices</string>
+    <string name="messages">Messages</string>
+    <string name="settings">Settings</string>
+    <string name="scan_qr">Scan QR Code</string>
+    <string name="show_qr">Show My QR</string>
+    <string name="battery_optimization">Battery Saver</string>
+    <string name="location_sharing">Share Location</string>
+    <string name="emergency_info">Emergency Info</string>
+    <string name="no_devices">No nearby devices</string>
+    <string name="device_count">%d devices nearby</string>
+    <string name="signal_strength">Signal: %s</string>
+    <string name="message_hint">Type a message…</string>
+    <string name="send">Send</string>
+    <string name="cancel_sos">Cancel SOS</string>
+    <string name="sos_cancelled">SOS cancelled</string>
+    <string name="sos_sent">SOS signal sent with your location</string>
+    <string name="sos_received">🚨 SOS from %s</string>
+    <string name="location_received">📍 Location shared: %s</string>
+    <string name="connecting">Connecting…</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="mesh_active">Mesh Network Active</string>
+    <string name="hops_count">%d hops</string>
+    <string name="battery_level">%d%% battery</string>
+    <string name="low_battery_mode">Low battery mode enabled</string>
+    <string name="permissions_required">Permissions required for mesh networking</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="emergency_contact">Emergency Contact</string>
+    <string name="medical_info">Medical Information</string>
+    <string name="blood_type">Blood Type</string>
+    <string name="allergies">Allergies</string>
+    <string name="medications">Medications</string>
+    <string name="save">Save</string>
+    <string name="saved">Saved</string>
+</resources>

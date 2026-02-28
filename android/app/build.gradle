@@ -1,0 +1,148 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.serialization'
+    id 'kotlin-kapt'
+}
+
+android {
+    namespace 'com.emergencymesh'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.emergencymesh"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+    }
+
+    signingConfigs {
+        debug {
+            // Debug signing (automatic)
+        }
+        release {
+            // Release signing - configure via environment variables or gradle.properties
+            // Or use command line: -PstoreFile=... -PstorePassword=... -PkeyPassword=...
+            def storeFile = project.hasProperty('RELEASE_STORE_FILE') ? 
+                project.property('RELEASE_STORE_FILE') : 'release.keystore'
+            def storePassword = project.hasProperty('RELEASE_STORE_PASSWORD') ? 
+                project.property('RELEASE_STORE_PASSWORD') : ''
+            def keyPassword = project.hasProperty('RELEASE_KEY_PASSWORD') ? 
+                project.property('RELEASE_KEY_PASSWORD') : ''
+            def keyAlias = project.hasProperty('RELEASE_KEY_ALIAS') ? 
+                project.property('RELEASE_KEY_ALIAS') : 'emergency-mesh'
+            
+            storeFile file(storeFile)
+            storePassword storePassword
+            keyPassword keyPassword
+            keyAlias keyAlias
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            debuggable true
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion "$version_compose_compiler"
+    }
+
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    // Core Android
+    implementation "androidx.core:core-ktx:$version_core_ktx"
+    implementation "androidx.appcompat:appcompat:$version_appcompat"
+    implementation "com.google.android.material:material:$version_material"
+
+    // Jetpack Compose
+    implementation platform('androidx.compose:compose-bom:2023.10.01')
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.ui:ui-graphics"
+    implementation "androidx.compose.ui:ui-tooling-preview"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-extended"
+
+    // Lifecycle
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:$version_lifecycle"
+    implementation "androidx.lifecycle:lifecycle-viewmodel-compose:$version_lifecycle"
+    implementation "androidx.lifecycle:lifecycle-service:$version_lifecycle"
+
+    // Navigation
+    implementation "androidx.navigation:navigation-compose:2.7.5"
+
+    // Room Database
+    implementation "androidx.room:room-runtime:$version_room"
+    implementation "androidx.room:room-ktx:$version_room"
+    kapt "androidx.room:room-compiler:$version_room"
+
+    // DataStore
+    implementation "androidx.datastore:datastore-preferences:$version_datastore"
+
+    // Meshrabiya - Mesh Networking
+    implementation "com.github.UstadMobile.Meshrabiya:lib-meshrabiya:$version_meshrabiya"
+
+    // Encryption - Google Tink
+    implementation "com.google.crypto.tink:tink-android:$version_tink"
+
+    // Kotlinx Serialization
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0"
+
+    // Coroutines
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3"
+
+    // Location Services
+    implementation "com.google.android.gms:play-services-location:21.0.1"
+
+    // QR Code
+    implementation "com.google.zxing:core:3.5.2"
+    implementation "com.journeyapps:zxing-android-embedded:4.3.0"
+
+    // Work Manager for background tasks
+    implementation "androidx.work:work-runtime-ktx:2.9.0"
+
+    // Testing
+    testImplementation "junit:junit:4.13.2"
+    androidTestImplementation "androidx.test.ext:junit:1.1.5"
+    androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"
+    androidTestImplementation platform('androidx.compose:compose-bom:2023.10.01')
+    androidTestImplementation "androidx.compose.ui:ui-test-junit4"
+    debugImplementation "androidx.compose.ui:ui-tooling"
+    debugImplementation "androidx.compose.ui:ui-test-manifest"
+}
