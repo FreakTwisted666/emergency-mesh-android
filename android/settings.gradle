@@ -3,7 +3,6 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
-        maven { url "https://devserver3.ustadmobile.com/maven2/" }
     }
 }
 
@@ -12,11 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url "https://devserver3.ustadmobile.com/maven2/" }
+        maven { url "https://jitpack.io" }
     }
 }
 
 rootProject.name = "EmergencyMesh"
 include ':app'
-
-// Meshrabiya is pulled from Maven repository, not local module

@@ -15,7 +15,6 @@ import com.emergencymesh.data.MessageType
 import com.ustadmobile.meshrabiya.lib.android.AndroidVirtualNode
 import com.ustadmobile.meshrabiya.lib.connect.MeshrabiyaConnectLink
 import com.ustadmobile.meshrabiya.lib.connect.hotspot.ConnectBand
-import com.ustadmobile.meshrabiya.lib.state.MeshrabiyaState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,11 +26,9 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.util.UUID
-import kotlin.math.min
 
 /**
  * Production-ready mesh networking manager using Meshrabiya
- * Handles WiFi Direct hotspot creation, peer discovery, and message routing
  */
 class MeshManager(private val context: Context) {
 
@@ -45,42 +42,31 @@ class MeshManager(private val context: Context) {
     private var discoveryJob: Job? = null
     private var retryJob: Job? = null
 
-    // Virtual node for mesh networking
     var virtualNode: AndroidVirtualNode? = null
         private set
 
-    // Connection state
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    // Nearby devices - populated from actual routing table
     private val _nearbyDevices = MutableStateFlow<List<Device>>(emptyList())
     val nearbyDevices: StateFlow<List<Device>> = _nearbyDevices.asStateFlow()
 
-    // Persistent device ID
     val deviceId: String by lazy {
         runBlocking { getOrCreateDeviceId() }
     }
 
-    // Virtual IP address assigned to this node
     var virtualAddress: String? = null
         private set
 
-    // Connect link for QR code sharing
     var connectLink: String? = null
         private set
 
-    // Message listener callbacks
     var onMessageReceived: ((Message) -> Unit)? = null
     var onDeviceDiscovered: ((Device) -> Unit)? = null
-    var onDeliveryConfirmed: ((String) -> Unit)? = null
 
-    // Message retry queue
     private val pendingMessages = mutableMapOf<String, PendingMessage>()
     private val MAX_RETRY_COUNT = 5
     private val RETRY_DELAY_MS = 5000L
-
-    // Known peer addresses for routing
     private val peerAddresses = mutableMapOf<String, InetAddress>()
 
     init {
@@ -158,10 +144,6 @@ class MeshManager(private val context: Context) {
                             peerAddresses[message.senderId] = packet.address
                             app.database.messageDao().insert(message)
                             
-                            if (message.messageType == MessageType.SOS) {
-                                sendDeliveryConfirmation(message.id)
-                            }
-                            
                             withContext(Dispatchers.Main) {
                                 onMessageReceived?.invoke(message)
                             }
@@ -212,7 +194,6 @@ class MeshManager(private val context: Context) {
                                 )
                                 devices.add(device)
                                 peerAddresses[device.id] = address
-                                Log.d(TAG, "Discovered device: ${device.virtualAddress} (${device.hopCount} hops)")
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error parsing route", e)
                             }
@@ -319,31 +300,25 @@ class MeshManager(private val context: Context) {
                         socket.soTimeout = 10000
                         
                         socket.outputStream.use { output ->
-                            val messageJson = message.toJson()
+                            val messageJson = messageToJson(message)
                             output.write(messageJson.toByteArray())
                             output.flush()
                         }
                         
-                        if (message.messageType == MessageType.SOS) {
-                            val confirmed = waitForDeliveryConfirmation(message.id, 5000)
-                            if (!confirmed) {
-                                Log.w(TAG, "SOS delivery not confirmed, will retry")
-                                addToRetryQueue(message)
-                            }
-                        }
-                        
                         socket.close()
                         Log.d(TAG, "Message sent: ${message.id} to $addr")
-                        return@withContext true
+                        true
                         
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to send message to $addr", e)
                         addToRetryQueue(message)
-                        return@withContext false
+                        false
                     }
                 }
+            } ?: run {
+                addToRetryQueue(message)
+                false
             }
-            return@withContext false
         } catch (e: Exception) {
             Log.e(TAG, "Error sending message", e)
             addToRetryQueue(message)
@@ -407,11 +382,7 @@ class MeshManager(private val context: Context) {
                     
                     toRetry.forEach { (messageId, pending) ->
                         Log.d(TAG, "Retrying message: $messageId (attempt ${pending.retryCount})")
-                        val success = sendMessage(pending.message)
-                        if (success) {
-                            pendingMessages.remove(messageId)
-                            Log.d(TAG, "Retry successful for: $messageId")
-                        }
+                        sendMessage(pending.message)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Retry processor error", e)
@@ -419,27 +390,6 @@ class MeshManager(private val context: Context) {
                 delay(RETRY_DELAY_MS)
             }
         }
-    }
-
-    private suspend fun sendDeliveryConfirmation(messageId: String) {
-        try {
-            val ackMessage = JSONObject().apply {
-                put("type", "ACK")
-                put("messageId", messageId)
-                put("timestamp", System.currentTimeMillis())
-            }
-            Log.d(TAG, "Sending delivery confirmation for: $messageId")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to send ACK", e)
-        }
-    }
-
-    private suspend fun waitForDeliveryConfirmation(messageId: String, timeoutMs: Long): Boolean {
-        val startTime = System.currentTimeMillis()
-        while (System.currentTimeMillis() - startTime < timeoutMs) {
-            delay(100)
-        }
-        return true
     }
 
     suspend fun enableHotspot(enabled: Boolean) = withContext(Dispatchers.IO) {
@@ -492,6 +442,21 @@ class MeshManager(private val context: Context) {
         }
     }
 
+    private fun messageToJson(message: Message): String {
+        return JSONObject().apply {
+            put("id", message.id)
+            put("senderId", message.senderId)
+            put("senderName", message.senderName ?: "")
+            put("content", message.content)
+            put("timestamp", message.timestamp)
+            put("messageType", message.messageType.name)
+            put("latitude", message.latitude ?: 0.0)
+            put("longitude", message.longitude ?: 0.0)
+            put("isRead", message.isRead)
+            put("hopCount", message.hopCount)
+        }.toString()
+    }
+
     private fun parseMessage(messageData: String): Message? {
         return try {
             if (messageData.length > MAX_MESSAGE_SIZE || messageData.isBlank()) {
@@ -510,13 +475,7 @@ class MeshManager(private val context: Context) {
                 longitude = json.optDouble("longitude", Double.NaN).let { if (it.isNaN()) null else it },
                 isRead = json.getBoolean("isRead"),
                 hopCount = json.getInt("hopCount"),
-                expiresAt = json.optLong("expiresAt", null),
-                isEncrypted = json.optBoolean("isEncrypted", false),
-                deliveryStatus = try {
-                    com.emergencymesh.data.DeliveryStatus.valueOf(json.optString("deliveryStatus", "PENDING"))
-                } catch (e: Exception) {
-                    com.emergencymesh.data.DeliveryStatus.PENDING
-                }
+                expiresAt = null
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse message", e)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.*
 
 /**
  * Manages visual SOS signals using camera flash
@@ -13,7 +14,8 @@ class SosFlashlight(private val context: Context) {
     private val cameraManager get() = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private var cameraId: String? = null
     private var isFlashing = false
-    private var flashJob: kotlinx.coroutines.Job? = null
+    private var flashJob: Job? = null
+    private val flashScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
         cameraId = cameraManager.cameraIdList.firstOrNull { id ->
@@ -27,23 +29,19 @@ class SosFlashlight(private val context: Context) {
         }
     }
 
-    fun startFlashing(scope: kotlinx.coroutines.CoroutineScope) {
+    fun startFlashing() {
         if (isFlashing || cameraId == null) return
 
         isFlashing = true
-        flashJob = scope.launch {
+        flashJob = flashScope.launch {
             while (isFlashing) {
                 try {
-                    // SOS in Morse code: ... --- ...
-                    // S: 3 short flashes
                     repeat(3) { flash() }
-                    kotlinx.coroutines.delay(500)
-                    // O: 3 long flashes
+                    delay(500)
                     repeat(3) { flash(long = true) }
-                    kotlinx.coroutines.delay(500)
-                    // S: 3 short flashes
+                    delay(500)
                     repeat(3) { flash() }
-                    kotlinx.coroutines.delay(1000)
+                    delay(1000)
                 } catch (e: Exception) {
                     Log.e(TAG, "Flash error", e)
                 }
@@ -60,9 +58,9 @@ class SosFlashlight(private val context: Context) {
 
     private suspend fun flash(long: Boolean = false) {
         turnOnFlash()
-        kotlinx.coroutines.delay(if (long) 600 else 200)
+        delay(if (long) 600 else 200)
         turnOffFlash()
-        kotlinx.coroutines.delay(200)
+        delay(200)
     }
 
     private fun turnOnFlash() {

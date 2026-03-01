@@ -305,7 +305,7 @@ class SosBeaconService : Service() {
             id = UUID.randomUUID().toString(),
             senderId = app.meshManager.deviceId,
             senderName = null,
-            content = buildSOSContent(),
+            content = buildSOSContent(location),
             timestamp = System.currentTimeMillis(),
             messageType = MessageType.SOS,
             latitude = if (hasValidLocation) location.latitude else null,
@@ -350,9 +350,9 @@ class SosBeaconService : Service() {
         }
     }
 
-    private fun buildSOSContent(): String {
+    private fun buildSOSContent(location: Location?): String {
         val baseMessage = "🚨 SOS - EMERGENCY - NEED HELP"
-        val locationInfo = currentLocation?.let { loc ->
+        val locationInfo = location?.let { loc ->
             if (loc.latitude != 0.0 && loc.longitude != 0.0) {
                 " Location: ${loc.latitude}, ${loc.longitude} (±${loc.accuracy.toInt()}m)"
             } else {

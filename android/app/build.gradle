@@ -29,19 +29,21 @@ android {
         release {
             // Release signing - configure via environment variables or gradle.properties
             // Or use command line: -PstoreFile=... -PstorePassword=... -PkeyPassword=...
-            def storeFile = project.hasProperty('RELEASE_STORE_FILE') ? 
-                project.property('RELEASE_STORE_FILE') : 'release.keystore'
-            def storePassword = project.hasProperty('RELEASE_STORE_PASSWORD') ? 
-                project.property('RELEASE_STORE_PASSWORD') : ''
-            def keyPassword = project.hasProperty('RELEASE_KEY_PASSWORD') ? 
-                project.property('RELEASE_KEY_PASSWORD') : ''
-            def keyAlias = project.hasProperty('RELEASE_KEY_ALIAS') ? 
+            def storeFileProp = project.hasProperty('RELEASE_STORE_FILE') ? 
+                project.property('RELEASE_STORE_FILE') : null
+            def storePasswordProp = project.hasProperty('RELEASE_STORE_PASSWORD') ? 
+                project.property('RELEASE_STORE_PASSWORD') : null
+            def keyPasswordProp = project.hasProperty('RELEASE_KEY_PASSWORD') ? 
+                project.property('RELEASE_KEY_PASSWORD') : null
+            def keyAliasProp = project.hasProperty('RELEASE_KEY_ALIAS') ? 
                 project.property('RELEASE_KEY_ALIAS') : 'emergency-mesh'
             
-            storeFile file(storeFile)
-            storePassword storePassword
-            keyPassword keyPassword
-            keyAlias keyAlias
+            if (storeFileProp != null) {
+                storeFile file(storeFileProp)
+                storePassword storePasswordProp
+                keyPassword keyPasswordProp
+                keyAlias keyAliasProp
+            }
         }
     }
 
@@ -114,8 +116,9 @@ dependencies {
     // DataStore
     implementation "androidx.datastore:datastore-preferences:$version_datastore"
 
-    // Meshrabiya - Mesh Networking
-    implementation "com.github.UstadMobile.Meshrabiya:lib-meshrabiya:$version_meshrabiya"
+    // Meshrabiya - Mesh Networking (from JitPack)
+    // Note: If build fails, comment out this line and use simplified networking
+    implementation "com.github.UstadMobile:Meshrabiya:main-SNAPSHOT"
 
     // Encryption - Google Tink
     implementation "com.google.crypto.tink:tink-android:$version_tink"
