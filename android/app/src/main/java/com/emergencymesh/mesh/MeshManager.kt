@@ -5,21 +5,21 @@ import android.net.wifi.WifiManager
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.emergencymesh.EmergencyMeshApp
 import com.emergencymesh.data.Device
 import com.emergencymesh.data.Message
 import com.emergencymesh.data.MessageType
 import com.ustadmobile.meshrabiya.vnet.AndroidVirtualNode
 import com.ustadmobile.meshrabiya.vnet.MeshrabiyaConnectLink
+import com.ustadmobile.meshrabiya.vnet.NodeConfig
 import com.ustadmobile.meshrabiya.vnet.wifi.ConnectBand
+import com.ustadmobile.meshrabiya.vnet.wifi.HotspotType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -35,15 +35,15 @@ class MeshManager(private val context: Context) {
     private val appContext = context.applicationContext
     private val app get() = EmergencyMeshApp.instance
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-    private val dataStore: DataStore<Preferences> = appContext.preferencesDataStore(name = "mesh_data")
+    private lateinit var dataStore: DataStore<Preferences>
 
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var receiveJob: Job? = null
     private var discoveryJob: Job? = null
     private var retryJob: Job? = null
 
-    var virtualNode: AndroidVirtualNode? = null
-        private set
+    private var virtualNode: AndroidVirtualNode? = null
+    private lateinit var chatSocket: DatagramSocket
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -51,12 +51,8 @@ class MeshManager(private val context: Context) {
     private val _nearbyDevices = MutableStateFlow<List<Device>>(emptyList())
     val nearbyDevices: StateFlow<List<Device>> = _nearbyDevices.asStateFlow()
 
-    val deviceId: String by lazy {
-        runBlocking { getOrCreateDeviceId() }
-    }
-
-    var virtualAddress: String? = null
-        private set
+    val deviceId: Int
+        get() = virtualNode?.address?.addressToInt() ?: 0
 
     var connectLink: String? = null
         private set
@@ -67,22 +63,15 @@ class MeshManager(private val context: Context) {
     private val pendingMessages = mutableMapOf<String, PendingMessage>()
     private val MAX_RETRY_COUNT = 5
     private val RETRY_DELAY_MS = 5000L
-    private val peerAddresses = mutableMapOf<String, InetAddress>()
+
+    private val json = Json { encodeDefaults = true }
 
     init {
+        dataStore = appContext.createDataStore(name = "meshr_settings")
         ioScope.launch {
             initializeVirtualNode()
         }
         startMessageRetryProcessor()
-    }
-
-    private suspend fun getOrCreateDeviceId(): String {
-        val DEVICE_ID_KEY = stringPreferencesKey("device_id")
-        return dataStore.data.first()[DEVICE_ID_KEY] ?: run {
-            val newId = "android_${UUID.randomUUID().toString().take(8)}"
-            dataStore.edit { prefs -> prefs[DEVICE_ID_KEY] = newId }
-            newId
-        }
     }
 
     private suspend fun initializeVirtualNode() = withContext(Dispatchers.IO) {
@@ -90,17 +79,16 @@ class MeshManager(private val context: Context) {
             virtualNode = AndroidVirtualNode(
                 appContext = appContext,
                 dataStore = dataStore,
-                address = InetAddress.getByName("169.254.1.1"),
-                networkPrefixLength = 16
+                json = json,
+                config = NodeConfig(maxHops = 5)
             )
 
             _connectionState.value = ConnectionState.CONNECTING
-            delay(2000)
             
-            virtualAddress = virtualNode?.address?.hostAddress
-            connectLink = virtualNode?.state?.first()?.connectUri
+            // Create bound socket for chat
+            chatSocket = virtualNode!!.createBoundDatagramSocket(MESSAGE_PORT)
             
-            Log.d(TAG, "Virtual node initialized: $virtualAddress")
+            Log.d(TAG, "Virtual node initialized: ${virtualNode!!.address.addressToDotNotation()}")
             
             startMessageListener()
             startDeviceDiscovery()
@@ -120,28 +108,21 @@ class MeshManager(private val context: Context) {
     private fun startMessageListener() {
         receiveJob?.cancel()
         receiveJob = ioScope.launch {
-            var serverSocket: DatagramSocket? = null
-            
             try {
-                serverSocket = virtualNode?.createBoundDatagramSocket(MESSAGE_PORT)
-                    ?: throw IllegalStateException("Failed to create message socket")
-                
-                Log.d(TAG, "Message listener started on port $MESSAGE_PORT")
-                
                 while (isActive) {
                     try {
                         val buffer = ByteArray(MAX_MESSAGE_SIZE)
                         val packet = DatagramPacket(buffer, buffer.size)
                         
-                        serverSocket.soTimeout = 1000
-                        serverSocket.receive(packet)
+                        chatSocket.soTimeout = 1000
+                        chatSocket.receive(packet)
                         
                         val messageData = String(packet.data, 0, packet.length)
                         val message = parseMessage(messageData)
                         
                         if (message != null) {
                             Log.d(TAG, "Received message: ${message.id} from ${message.senderId}")
-                            peerAddresses[message.senderId] = packet.address
+                            
                             app.database.messageDao().insert(message)
                             
                             withContext(Dispatchers.Main) {
@@ -163,8 +144,6 @@ class MeshManager(private val context: Context) {
                     delay(2000)
                     startMessageListener()
                 }
-            } finally {
-                serverSocket?.close()
             }
         }
     }
@@ -177,65 +156,30 @@ class MeshManager(private val context: Context) {
                     val state = virtualNode?.state?.first()
                     val devices = mutableListOf<Device>()
                     
-                    state?.let { meshrabiyaState ->
-                        meshrabiyaState.routingTable?.forEach { (address, route) ->
-                            try {
-                                val device = Device(
-                                    id = address.hostAddress ?: continue,
-                                    name = null,
-                                    virtualAddress = address.hostAddress,
-                                    signalStrength = route.signalStrength ?: -100,
-                                    hopCount = route.hopCount ?: 0,
-                                    lastSeen = System.currentTimeMillis(),
-                                    batteryLevel = null,
-                                    isSosActive = false,
-                                    latitude = null,
-                                    longitude = null
-                                )
-                                devices.add(device)
-                                peerAddresses[device.id] = address
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error parsing route", e)
-                            }
-                        }
-                        
-                        meshrabiyaState.connectedPeers?.forEach { peerInfo ->
-                            try {
-                                val existingIndex = devices.indexOfFirst { it.virtualAddress == peerInfo.address }
-                                if (existingIndex >= 0) {
-                                    devices[existingIndex] = devices[existingIndex].copy(
-                                        lastSeen = System.currentTimeMillis(),
-                                        signalStrength = peerInfo.signalStrength ?: devices[existingIndex].signalStrength
-                                    )
-                                } else {
-                                    val device = Device(
-                                        id = peerInfo.address,
-                                        name = null,
-                                        virtualAddress = peerInfo.address,
-                                        signalStrength = peerInfo.signalStrength ?: -100,
-                                        hopCount = 1,
-                                        lastSeen = System.currentTimeMillis(),
-                                        batteryLevel = null,
-                                        isSosActive = false,
-                                        latitude = null,
-                                        longitude = null
-                                    )
-                                    devices.add(device)
-                                    peerAddresses[peerInfo.address] = InetAddress.getByName(peerInfo.address)
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error parsing peer info", e)
-                            }
+                    state?.originatorMessages?.forEach { (addrInt, lastMsg) ->
+                        try {
+                            val device = Device(
+                                id = addrInt.addressToDotNotation(),
+                                name = null,
+                                virtualAddress = addrInt.addressToDotNotation(),
+                                signalStrength = -100, // Not available in Meshrabiya
+                                hopCount = lastMsg.hopCount.toInt(),
+                                lastSeen = lastMsg.timeReceived,
+                                batteryLevel = null,
+                                isSosActive = false,
+                                latitude = null,
+                                longitude = null
+                            )
+                            devices.add(device)
+                            Log.d(TAG, "Discovered device: ${device.virtualAddress} (${device.hopCount} hops)")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing device", e)
                         }
                     }
                     
+                    // Clean up stale devices (not seen in 60 seconds)
                     val staleCutoff = System.currentTimeMillis() - 60000
                     val activeDevices = devices.filter { it.lastSeen > staleCutoff }
-                    
-                    val staleAddresses = peerAddresses.keys.filter { address ->
-                        !activeDevices.any { it.virtualAddress == address || it.id == address }
-                    }
-                    staleAddresses.forEach { peerAddresses.remove(it) }
                     
                     if (activeDevices.isNotEmpty()) {
                         app.database.deviceDao().insertAll(activeDevices)
@@ -274,62 +218,45 @@ class MeshManager(private val context: Context) {
         }
         
         try {
-            virtualNode?.let { node ->
-                val socketFactory = node.socketFactory
-                
-                val destinationAddress = when {
-                    message.messageType == MessageType.SOS -> {
-                        InetAddress.getByName("255.255.255.255")
-                    }
-                    peerAddresses.containsKey(message.senderId) -> {
-                        peerAddresses[message.senderId]
-                    }
-                    else -> {
-                        try {
-                            InetAddress.getByName(message.senderId)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Cannot resolve address: ${message.senderId}", e)
-                            return@withContext false
-                        }
-                    }
+            val data = messageToJson(message).encodeToByteArray()
+            val packet = DatagramPacket(data, data.size)
+            
+            // Parse destination address
+            val destAddr = when {
+                message.messageType == MessageType.SOS -> {
+                    // Broadcast
+                    byteArrayOf(-1.toByte(), -1.toByte(), -1.toByte(), -1.toByte())
                 }
-                
-                destinationAddress?.let { addr ->
+                else -> {
                     try {
-                        val socket = socketFactory.createSocket(addr, MESSAGE_PORT)
-                        socket.soTimeout = 10000
-                        
-                        socket.outputStream.use { output ->
-                            val messageJson = messageToJson(message)
-                            output.write(messageJson.toByteArray())
-                            output.flush()
-                        }
-                        
-                        socket.close()
-                        Log.d(TAG, "Message sent: ${message.id} to $addr")
-                        true
-                        
+                        InetAddress.getByName(message.senderId).address
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to send message to $addr", e)
-                        addToRetryQueue(message)
-                        false
+                        Log.e(TAG, "Cannot resolve address: ${message.senderId}", e)
+                        return@withContext false
                     }
                 }
-            } ?: run {
-                addToRetryQueue(message)
-                false
             }
+            
+            packet.address = InetAddress.getByAddress(
+                intToByteArray(destAddr)
+            )
+            packet.port = MESSAGE_PORT
+            
+            chatSocket.send(packet)
+            Log.d(TAG, "Message sent: ${message.id}")
+            true
+            
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending message", e)
+            Log.e(TAG, "Failed to send message", e)
             addToRetryQueue(message)
-            return@withContext false
+            false
         }
     }
 
     suspend fun broadcastSOS(latitude: Double?, longitude: Double?): Boolean {
         val sosMessage = Message(
             id = UUID.randomUUID().toString(),
-            senderId = deviceId,
+            senderId = deviceId.addressToDotNotation(),
             senderName = null,
             content = "🚨 SOS - EMERGENCY - NEED HELP",
             timestamp = System.currentTimeMillis(),
@@ -396,13 +323,15 @@ class MeshManager(private val context: Context) {
         try {
             virtualNode?.setWifiHotspotEnabled(
                 enabled = enabled,
-                preferredBand = ConnectBand.BAND_24GHZ
+                preferredBand = ConnectBand.BAND_2GHZ,
+                hotspotType = HotspotType.AUTO
             )
 
             if (enabled) {
-                delay(3000)
+                // Wait for hotspot to start
+                virtualNode?.state?.first { it.wifiState.hotspotIsStarted }
+                
                 connectLink = virtualNode?.state?.first()?.connectUri
-                virtualAddress = virtualNode?.address?.hostAddress
                 Log.d(TAG, "Hotspot enabled. Connect link: $connectLink")
             }
         } catch (e: Exception) {
@@ -415,8 +344,8 @@ class MeshManager(private val context: Context) {
 
     suspend fun connectToHotspot(connectLink: String) = withContext(Dispatchers.IO) {
         try {
-            val config = MeshrabiyaConnectLink.parseUri(connectLink).hotspotConfig
-            if (config != null) {
+            val link = MeshrabiyaConnectLink.parseUri(connectLink, json)
+            link.hotspotConfig?.let { config ->
                 Log.d(TAG, "Connecting to hotspot: ${config.ssid}")
                 virtualNode?.connectAsStation(config)
             }
@@ -431,8 +360,8 @@ class MeshManager(private val context: Context) {
                 receiveJob?.cancel()
                 discoveryJob?.cancel()
                 retryJob?.cancel()
+                chatSocket.close()
                 virtualNode?.close()
-                peerAddresses.clear()
                 pendingMessages.clear()
                 _connectionState.value = ConnectionState.DISCONNECTED
                 Log.d(TAG, "MeshManager cleaned up")
@@ -504,4 +433,34 @@ data class PendingMessage(
     val lastRetryTime: Long
 )
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "meshr_settings")
+// Extension to convert Int IP to dotted notation
+fun Int.addressToDotNotation(): String {
+    return "${(this shr 24) and 0xFF}.${(this shr 16) and 0xFF}.${(this shr 8) and 0xFF}.${this and 0xFF}"
+}
+
+// Extension to convert Int to byte array
+fun intToByteArray(value: Int): ByteArray {
+    return byteArrayOf(
+        ((value shr 24) and 0xFF).toByte(),
+        ((value shr 16) and 0xFF).toByte(),
+        ((value shr 8) and 0xFF).toByte(),
+        (value and 0xFF).toByte()
+    )
+}
+
+// Extension to convert InetAddress to Int
+fun InetAddress.addressToInt(): Int {
+    val addr = address
+    return ((addr[0].toInt() and 0xFF) shl 24) or
+           ((addr[1].toInt() and 0xFF) shl 16) or
+           ((addr[2].toInt() and 0xFF) shl 8) or
+           (addr[3].toInt() and 0xFF)
+}
+
+// Extension function to create DataStore
+fun Context.createDataStore(name: String): DataStore<Preferences> {
+    return androidx.datastore.preferences.preferencesDataStore(
+        context = this,
+        name = name
+    ).value
+}

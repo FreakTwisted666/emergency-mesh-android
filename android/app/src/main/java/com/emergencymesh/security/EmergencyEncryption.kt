@@ -1,7 +1,6 @@
 package com.emergencymesh.security
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.util.Base64
 import android.util.Log
 import com.google.crypto.tink.Aead
@@ -19,7 +18,6 @@ class EmergencyEncryption(private val context: Context) {
 
     private var aead: Aead? = null
     private var keysetHandle: KeysetHandle? = null
-    private val prefs: SharedPreferences = context.getSharedPreferences(ENCRYPTION_PREFS, Context.MODE_PRIVATE)
 
     init {
         try {
@@ -32,30 +30,12 @@ class EmergencyEncryption(private val context: Context) {
 
     private fun initializeKeyset() {
         try {
-            val keysetJson = prefs.getString(KEYSET_KEY, null)
-
-            if (keysetJson != null) {
-                val keysetBytes = Base64.decode(keysetJson, Base64.DEFAULT)
-                keysetHandle = KeysetHandle.read(com.google.crypto.tink.JsonKeysetReader.withBytes(keysetBytes))
-            } else {
-                keysetHandle = KeysetHandle.generateNew(KeyTemplates.get("AES256_GCM"))
-                val keysetBytes = keysetHandle?.write(com.google.crypto.tink.JsonKeysetWriter.withoutSecrets())
-                val keysetJson = Base64.encodeToString(keysetBytes, Base64.DEFAULT)
-                prefs.edit().putString(KEYSET_KEY, keysetJson).apply()
-            }
-
+            // Generate new keyset each time (simplified - production should persist)
+            keysetHandle = KeysetHandle.generateNew(KeyTemplates.get("AES256_GCM"))
             aead = keysetHandle?.getPrimitive(Aead::class.java)
             Log.d(TAG, "Encryption initialized successfully")
-
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize keyset", e)
-            try {
-                keysetHandle = KeysetHandle.generateNew(KeyTemplates.get("AES256_GCM"))
-                aead = keysetHandle?.getPrimitive(Aead::class.java)
-                Log.w(TAG, "Encryption initialized with new keyset")
-            } catch (e2: Exception) {
-                Log.e(TAG, "Failed to create fallback keyset", e2)
-            }
         }
     }
 
@@ -87,7 +67,5 @@ class EmergencyEncryption(private val context: Context) {
 
     companion object {
         private const val TAG = "EmergencyEncryption"
-        private const val ENCRYPTION_PREFS = "emergency_encryption_keys"
-        private const val KEYSET_KEY = "master_keyset"
     }
 }

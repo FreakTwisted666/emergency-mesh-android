@@ -80,24 +80,26 @@ class MeshService : Service() {
 
     private fun startMeshNetwork() {
         val app = application as EmergencyMeshApp
+        // Launch in serviceScope
         serviceScope.launch {
-            app.meshManager.let { manager ->
-                try {
-                    manager.enableHotspot(true)
-                    manager.startDeviceDiscovery()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start mesh network", e)
-                }
+            try {
+                app.meshManager.enableHotspot(true)
+                app.meshManager.startDeviceDiscovery()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start mesh network", e)
             }
         }
     }
 
     private fun stopMeshNetwork() {
         val app = application as EmergencyMeshApp
-        app.meshManager.let { manager ->
-            manager.enableHotspot(false)
-            manager.stopDeviceDiscovery()
-            manager.cleanup()
+        // Run cleanup in scope
+        serviceScope.launch {
+            app.meshManager.let { manager ->
+                manager.enableHotspot(false)
+                manager.stopDeviceDiscovery()
+                manager.cleanup()
+            }
         }
     }
 
