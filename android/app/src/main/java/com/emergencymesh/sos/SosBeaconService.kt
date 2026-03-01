@@ -301,12 +301,12 @@ class SosBeaconService : Service() {
             Log.w(TAG, "Location accuracy too poor: ${location.accuracy}m")
         }
 
-        val latValue = if (hasValidLocation) location!!.latitude else null
-        val lonValue = if (hasValidLocation) location!!.longitude else null
+        val latValue: Double? = if (hasValidLocation && location != null) location.latitude else null
+        val lonValue: Double? = if (hasValidLocation && location != null) location.longitude else null
 
         val sosMessage = Message(
             id = UUID.randomUUID().toString(),
-            senderId = app.meshManager.deviceId.addressToDotNotation(),
+            senderId = app.meshManager.deviceId,
             senderName = null,
             content = buildSOSContent(location),
             timestamp = System.currentTimeMillis(),
@@ -331,8 +331,8 @@ class SosBeaconService : Service() {
         serviceScope.launch {
             try {
                 val success = app.meshManager.broadcastSOS(
-                    latitude = if (hasValidLocation) location.latitude else null,
-                    longitude = if (hasValidLocation) location.longitude else null
+                    latitude = latValue,
+                    longitude = lonValue
                 )
 
                 lastBroadcastSuccess = success

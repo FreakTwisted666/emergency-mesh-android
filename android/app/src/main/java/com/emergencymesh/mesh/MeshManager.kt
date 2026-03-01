@@ -5,6 +5,8 @@ import android.net.wifi.WifiManager
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.emergencymesh.EmergencyMeshApp
 import com.emergencymesh.data.Device
 import com.emergencymesh.data.Message
@@ -35,7 +37,7 @@ class MeshManager(private val context: Context) {
     private val appContext = context.applicationContext
     private val app get() = EmergencyMeshApp.instance
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-    private lateinit var dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>
 
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var receiveJob: Job? = null
@@ -51,8 +53,8 @@ class MeshManager(private val context: Context) {
     private val _nearbyDevices = MutableStateFlow<List<Device>>(emptyList())
     val nearbyDevices: StateFlow<List<Device>> = _nearbyDevices.asStateFlow()
 
-    val deviceId: Int
-        get() = virtualNode?.address?.addressToInt() ?: 0
+    val deviceId: String
+        get() = virtualNode?.address?.let { addr -> addr.addressToDotNotation() } ?: "0.0.0.0"
 
     var connectLink: String? = null
         private set
@@ -67,7 +69,9 @@ class MeshManager(private val context: Context) {
     private val json = Json { encodeDefaults = true }
 
     init {
-        dataStore = appContext.createDataStore(name = "meshr_settings")
+        // Initialize DataStore using preferencesDataStore delegate
+        dataStore = context.applicationContext.getDataStore(name = "meshr_settings")
+        
         ioScope.launch {
             initializeVirtualNode()
         }
@@ -92,16 +96,20 @@ class MeshManager(private val context: Context) {
             
             startMessageListener()
             startDeviceDiscovery()
-            
+
             _connectionState.value = ConnectionState.CONNECTED
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize virtual node", e)
             _connectionState.value = ConnectionState.ERROR
-            delay(5000)
-            if (_connectionState.value != ConnectionState.CONNECTED) {
-                initializeVirtualNode()
-            }
+            scheduleRetry()
+        }
+    }
+
+    private fun scheduleRetry() {
+        ioScope.launch {
+            delay(5000L)
+            initializeVirtualNode()
         }
     }
 
@@ -111,8 +119,8 @@ class MeshManager(private val context: Context) {
             try {
                 while (isActive) {
                     try {
-                        val buffer = ByteArray(MAX_MESSAGE_SIZE)
-                        val packet = DatagramPacket(buffer, buffer.size)
+                        val buffer: ByteArray = ByteArray(MAX_MESSAGE_SIZE)
+                        val packet: DatagramPacket = DatagramPacket(buffer, buffer.size)
                         
                         chatSocket.soTimeout = 1000
                         chatSocket.receive(packet)
@@ -162,7 +170,7 @@ class MeshManager(private val context: Context) {
                                 id = addrInt.addressToDotNotation(),
                                 name = null,
                                 virtualAddress = addrInt.addressToDotNotation(),
-                                signalStrength = -100, // Not available in Meshrabiya
+                                signalStrength = -100,
                                 hopCount = lastMsg.hopCount.toInt(),
                                 lastSeen = lastMsg.timeReceived,
                                 batteryLevel = null,
@@ -220,12 +228,17 @@ class MeshManager(private val context: Context) {
         try {
             val data = messageToJson(message).encodeToByteArray()
             val packet = DatagramPacket(data, data.size)
-            
+
             // Parse destination address
-            val destAddr = when {
+            val destAddr: ByteArray = when {
                 message.messageType == MessageType.SOS -> {
-                    // Broadcast
-                    byteArrayOf(-1.toByte(), -1.toByte(), -1.toByte(), -1.toByte())
+                    // Broadcast - 255.255.255.255
+                    byteArrayOf(
+                        0xFF.toByte(),
+                        0xFF.toByte(),
+                        0xFF.toByte(),
+                        0xFF.toByte()
+                    )
                 }
                 else -> {
                     try {
@@ -236,10 +249,8 @@ class MeshManager(private val context: Context) {
                     }
                 }
             }
-            
-            packet.address = InetAddress.getByAddress(
-                intToByteArray(destAddr)
-            )
+
+            packet.address = InetAddress.getByAddress(destAddr)
             packet.port = MESSAGE_PORT
             
             chatSocket.send(packet)
@@ -256,7 +267,7 @@ class MeshManager(private val context: Context) {
     suspend fun broadcastSOS(latitude: Double?, longitude: Double?): Boolean {
         val sosMessage = Message(
             id = UUID.randomUUID().toString(),
-            senderId = deviceId.addressToDotNotation(),
+            senderId = deviceId,
             senderName = null,
             content = "🚨 SOS - EMERGENCY - NEED HELP",
             timestamp = System.currentTimeMillis(),
@@ -438,29 +449,7 @@ fun Int.addressToDotNotation(): String {
     return "${(this shr 24) and 0xFF}.${(this shr 16) and 0xFF}.${(this shr 8) and 0xFF}.${this and 0xFF}"
 }
 
-// Extension to convert Int to byte array
-fun intToByteArray(value: Int): ByteArray {
-    return byteArrayOf(
-        ((value shr 24) and 0xFF).toByte(),
-        ((value shr 16) and 0xFF).toByte(),
-        ((value shr 8) and 0xFF).toByte(),
-        (value and 0xFF).toByte()
-    )
-}
-
-// Extension to convert InetAddress to Int
-fun InetAddress.addressToInt(): Int {
-    val addr = address
-    return ((addr[0].toInt() and 0xFF) shl 24) or
-           ((addr[1].toInt() and 0xFF) shl 16) or
-           ((addr[2].toInt() and 0xFF) shl 8) or
-           (addr[3].toInt() and 0xFF)
-}
-
-// Extension function to create DataStore
-fun Context.createDataStore(name: String): DataStore<Preferences> {
-    return androidx.datastore.preferences.preferencesDataStore(
-        context = this,
-        name = name
-    ).value
+// Extension to convert InetAddress to dotted notation
+fun InetAddress.addressToDotNotation(): String {
+    return "${(this.address[0].toInt() and 0xFF)}.${(this.address[1].toInt() and 0xFF)}.${(this.address[2].toInt() and 0xFF)}.${(this.address[3].toInt() and 0xFF)}"
 }
