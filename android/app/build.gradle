@@ -121,6 +121,7 @@ dependencies {
 
     // Encryption - Google Tink
     implementation "com.google.crypto.tink:tink-android:$version_tink"
+    implementation "androidx.security:security-crypto:1.1.0-alpha06"
 
     // Kotlinx Serialization
     implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0"
