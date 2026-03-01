@@ -17,3 +17,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "EmergencyMesh"
 include ':app'
+include ':lib-meshrabiya'
+include ':test-shared'
+project(':lib-meshrabiya').projectDir = new File('../meshrabiya-lib/lib-meshrabiya')
+project(':test-shared').projectDir = new File('../meshrabiya-lib/test-shared')

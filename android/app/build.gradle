@@ -116,9 +116,8 @@ dependencies {
     // DataStore
     implementation "androidx.datastore:datastore-preferences:$version_datastore"
 
-    // Meshrabiya - Mesh Networking (from JitPack)
-    // Note: If build fails, comment out this line and use simplified networking
-    implementation "com.github.UstadMobile:Meshrabiya:main-SNAPSHOT"
+    // Meshrabiya - Mesh Networking (local module)
+    implementation project(':lib-meshrabiya')
 
     // Encryption - Google Tink
     implementation "com.google.crypto.tink:tink-android:$version_tink"
