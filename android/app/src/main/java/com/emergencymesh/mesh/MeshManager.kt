@@ -12,9 +12,9 @@ import com.emergencymesh.EmergencyMeshApp
 import com.emergencymesh.data.Device
 import com.emergencymesh.data.Message
 import com.emergencymesh.data.MessageType
-import com.ustadmobile.meshrabiya.lib.android.AndroidVirtualNode
-import com.ustadmobile.meshrabiya.lib.connect.MeshrabiyaConnectLink
-import com.ustadmobile.meshrabiya.lib.connect.hotspot.ConnectBand
+import com.ustadmobile.meshrabiya.vnet.AndroidVirtualNode
+import com.ustadmobile.meshrabiya.vnet.MeshrabiyaConnectLink
+import com.ustadmobile.meshrabiya.vnet.wifi.ConnectBand
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

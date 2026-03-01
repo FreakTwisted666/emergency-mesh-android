@@ -1,6 +1,7 @@
 package com.emergencymesh.data
 
 import androidx.room.*
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "messages")
@@ -15,26 +16,14 @@ data class Message(
     val longitude: Double?,
     val isRead: Boolean,
     val hopCount: Int,
-    val expiresAt: Long?,
-    val isEncrypted: Boolean = false,
-    val deliveryStatus: DeliveryStatus = DeliveryStatus.PENDING,
-    val deliveredAt: Long? = null
+    val expiresAt: Long?
 )
 
 enum class MessageType {
     TEXT,
     SOS,
     LOCATION,
-    EMERGENCY_INFO,
-    ACK  // Delivery confirmation
-}
-
-enum class DeliveryStatus {
-    PENDING,      // Waiting to be sent
-    SENDING,      // Currently being sent
-    SENT,         // Successfully sent
-    DELIVERED,    // Recipient confirmed delivery
-    FAILED        // Failed after retries
+    EMERGENCY_INFO
 }
 
 @Entity(tableName = "devices")
@@ -62,23 +51,6 @@ data class EmergencyInfo(
     val medicalNotes: String?
 )
 
-@Entity(tableName = "message_queue")
-data class QueuedMessage(
-    @PrimaryKey val id: String,
-    val messageJson: String,
-    val retryCount: Int = 0,
-    val lastRetryTime: Long = 0,
-    val createdAt: Long = System.currentTimeMillis(),
-    val priority: MessagePriority = MessagePriority.NORMAL
-)
-
-enum class MessagePriority {
-    LOW,
-    NORMAL,
-    HIGH,
-    CRITICAL  // SOS messages
-}
-
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages ORDER BY timestamp DESC")
@@ -90,32 +62,17 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE messageType = 'SOS' ORDER BY timestamp DESC")
     fun getSosMessages(): Flow<List<Message>>
 
-    @Query("SELECT * FROM messages WHERE deliveryStatus = 'PENDING' OR deliveryStatus = 'SENDING'")
-    suspend fun getPendingMessages(): List<Message>
-
-    @Query("SELECT * FROM messages WHERE id = :messageId")
-    suspend fun getMessage(messageId: String): Message?
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(message: Message)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(messages: List<Message>)
 
-    @Update
-    suspend fun update(message: Message)
-
-    @Query("UPDATE messages SET deliveryStatus = :status, deliveredAt = :deliveredAt WHERE id = :messageId")
-    suspend fun updateDeliveryStatus(messageId: String, status: DeliveryStatus, deliveredAt: Long? = null)
-
-    @Query("DELETE FROM messages WHERE timestamp < :cutoffTime AND messageType != 'SOS'")
+    @Query("DELETE FROM messages WHERE timestamp < :cutoffTime")
     suspend fun deleteOlderThan(cutoffTime: Long)
 
     @Query("UPDATE messages SET isRead = 1 WHERE id = :messageId")
     suspend fun markAsRead(messageId: String)
-
-    @Query("SELECT COUNT(*) FROM messages WHERE deliveryStatus = 'PENDING'")
-    suspend fun getPendingCount(): Int
 }
 
 @Dao
@@ -135,17 +92,11 @@ interface DeviceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(devices: List<Device>)
 
-    @Update
-    suspend fun update(device: Device)
-
     @Query("DELETE FROM devices WHERE lastSeen < :cutoffTime")
     suspend fun deleteStaleDevices(cutoffTime: Long)
 
     @Query("SELECT COUNT(*) FROM devices")
     fun getDeviceCount(): Int
-
-    @Query("SELECT * FROM devices WHERE virtualAddress = :address")
-    suspend fun getDeviceByAddress(address: String): Device?
 }
 
 @Dao
@@ -160,41 +111,9 @@ interface EmergencyInfoDao {
     suspend fun deleteAll()
 }
 
-@Dao
-interface MessageQueueDao {
-    @Query("SELECT * FROM message_queue ORDER BY priority DESC, createdAt ASC")
-    suspend fun getAllQueued(): List<QueuedMessage>
-
-    @Query("SELECT * FROM message_queue WHERE priority = 'CRITICAL'")
-    suspend fun getCriticalMessages(): List<QueuedMessage>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(queued: QueuedMessage)
-
-    @Update
-    suspend fun update(queued: QueuedMessage)
-
-    @Delete
-    suspend fun delete(queued: QueuedMessage)
-
-    @Query("DELETE FROM message_queue WHERE id = :id")
-    suspend fun deleteById(id: String)
-
-    @Query("SELECT COUNT(*) FROM message_queue")
-    suspend fun getCount(): Int
-
-    @Query("SELECT COUNT(*) FROM message_queue WHERE priority = 'CRITICAL'")
-    suspend fun getCriticalCount(): Int
-}
-
 @Database(
-    entities = [
-        Message::class,
-        Device::class,
-        EmergencyInfo::class,
-        QueuedMessage::class
-    ],
-    version = 2,
+    entities = [Message::class, Device::class, EmergencyInfo::class],
+    version = 1,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -202,7 +121,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun deviceDao(): DeviceDao
     abstract fun emergencyInfoDao(): EmergencyInfoDao
-    abstract fun messageQueueDao(): MessageQueueDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -214,26 +132,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "emergency_mesh_db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance
-            }
-        }
-
-        // Migration from version 1 to 2 (added message_queue table)
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("""
-                    CREATE TABLE IF NOT EXISTS message_queue (
-                        id TEXT PRIMARY KEY NOT NULL,
-                        messageJson TEXT NOT NULL,
-                        retryCount INTEGER NOT NULL DEFAULT 0,
-                        lastRetryTime INTEGER NOT NULL DEFAULT 0,
-                        createdAt INTEGER NOT NULL DEFAULT 0,
-                        priority TEXT NOT NULL DEFAULT 'NORMAL'
-                    )
-                """)
             }
         }
     }
@@ -245,16 +147,4 @@ class Converters {
 
     @TypeConverter
     fun toMessageType(value: String): MessageType = MessageType.valueOf(value)
-
-    @TypeConverter
-    fun fromDeliveryStatus(value: DeliveryStatus): String = value.name
-
-    @TypeConverter
-    fun toDeliveryStatus(value: String): DeliveryStatus = DeliveryStatus.valueOf(value)
-
-    @TypeConverter
-    fun fromMessagePriority(value: MessagePriority): String = value.name
-
-    @TypeConverter
-    fun toMessagePriority(value: String): MessagePriority = MessagePriority.valueOf(value)
 }
